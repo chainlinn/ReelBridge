@@ -1,0 +1,32 @@
+name: Test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm test
+      - run: node bin/reel-bridge.mjs --version
+      - name: Check package contents
+        shell: bash
+        run: |
+          npm pack --dry-run --json > /tmp/package.json
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs';
+          const files = JSON.parse(readFileSync('/tmp/package.json', 'utf8'))[0].files;
+          for (const {path} of files) {
+            if (!['package.json', 'README.md', 'CHANGELOG.md', '.env.example'].includes(path) && !/^(bin|src|assets)\//.test(path)) {
+              throw new Error('Unexpected package file: ' + path);
+            }
+          }
+          JS

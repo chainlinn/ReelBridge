@@ -1,0 +1,48 @@
+# PanSou 内网部署 · 精简版
+#   docker compose up -d  ->  http://<内网IP>:7742
+#
+# 镜像 ghcr.io/fish2018/pansou-web 已内置 nginx + Go 后端 + 前端 + 健康检查，
+# 下列默认值都写死在镜像里，无需重复声明：
+#   TZ=Asia/Shanghai  DOMAIN=localhost  PANSOU_HOST=127.0.0.1  PORT=PANSOU_PORT=8888
+#   CACHE_PATH=/app/data/cache  LOG_PATH=/app/data/logs
+#   CHANNELS=<111个内置频道>  CACHE/ASYNC/TIMEOUT 全套默认值
+name: pansou
+
+services:
+  pansou:
+    image: ghcr.io/fish2018/pansou-web:latest
+    container_name: pansou-app
+    restart: unless-stopped
+    # 退出时后端要落盘缓存，别让 docker 提前 SIGKILL
+    stop_grace_period: 30s
+    ports:
+      - "7742:80"   # 宿主机 7742 -> 容器内 nginx 80
+    extra_hosts:
+      # 让容器能用 host.docker.internal 访问宿主机（macOS 自带，Linux 需要这行）
+      - "host.docker.internal:host-gateway"
+    environment:
+      # 插件必须显式声明，否则不加载任何插件；列表为 73 个（镜像默认 68 + 补齐 5 个）
+      ENABLED_PLUGINS: "488run,5266ys,aipan,btbtlb,buerchen,cldi,clmao,clxiong,cyg,diduan,djgou,duanjuw,duoduo,dy4k,dygang,dyyj,dyyjpro,erxiaopan,feikuai,gaoqing888,gying,haitunsou,hdmoli,hjzhencai,huban,hunhepan,ikantv,jsnoteclub,jutoushe,kkv,kpkuang,labi,leso,libvio,lingjisp,lou1,meitizy,melost,miosou,muou,nsgame,nyaa,ouge,pan365,panlian,pansearch,qqpd,quark4k,quarkres,quarksoo,quarktv,rrbt,shandian,sopanya,sousou,susu,thepiratebay,ting77,u3c3,wanou,weibo,woniu,xb6v,xiaokupan,xiaoyu,xiaozhang,yingso,yulinshufa,yunso,yunsou,zhizhen,zlxapp,zxzj"
+      # 需要自定义频道就加（不写则用镜像内置的 111 个）：
+      # CHANNELS: "tgsearchers7,yunpanx,..."
+      # 访问外网（TG 频道/插件站点）走宿主机 Clash 的 7890 混合端口
+      # 前提：Clash 已开「允许局域网连接」，否则 7890 只监听 127.0.0.1，容器连不上
+      PROXY: "http://host.docker.internal:7890"
+      NO_PROXY: "localhost,127.0.0.1,::1"
+
+      # ---------- 登录认证 ----------
+      # 凭据统一放在同目录 .env（.env 已在 .gitignore 中）
+      # AUTH_USERS 格式 user:pass,user2:pass2，不能含逗号
+      AUTH_ENABLED: "true"
+      AUTH_USERS: "${AUTH_USERS:?请在 .env 中设置 AUTH_USERS}"
+      AUTH_TOKEN_EXPIRY: "24"   # 登录有效期（小时）
+      # 必须显式给：不填时后端会用时间戳临时生成，每次重启都变，导致已登录的人全部掉线
+      AUTH_JWT_SECRET: "${AUTH_JWT_SECRET:?请在 .env 中设置 AUTH_JWT_SECRET}"
+    volumes:
+      # 缓存 + 日志落到宿主机 ./data（首次启动会自动创建 cache/ logs/ 子目录）
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

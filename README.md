@@ -1,10 +1,12 @@
 # ReelBridge · 影桥
 
-连接媒体搜索、网盘转存与入库同步的 MCP 服务。零 npm 运行依赖，自动托管 PanSou 或连接已有实例。
+连接媒体搜索、网盘转存与入库同步的 MCP 服务。零 npm 运行依赖，支持自动托管 PanSou 或连接已有实例。
 
 ## 使用
 
-需要 Node.js ≥22.16、Git；托管模式另需已启动的 Docker + Compose v2。
+需要 **Node.js ≥22.16、Git**；自动托管另需 **Docker + Compose v2**。
+
+添加到 MCP 客户端：
 
 ```json
 {
@@ -17,61 +19,46 @@
 }
 ```
 
-默认 stdio，由 MCP 客户端启动。直接在终端执行会提示正在等待客户端，按 Ctrl+C 退出。
+首次搜索或校验时自动启动后端。直接在终端无参数运行会等待 MCP 请求，不是卡住；手动部署使用 `up`。
 
-**首次搜索/校验才准备后端。** 握手、工具发现、`status` 和 CMS 操作不启动 Docker。默认地址 `127.0.0.1:7742`，数据与自动生成的凭据保存在 `~/.reel-bridge`。退出 MCP 不停止容器，启动不自动更新已有镜像。
-
-## 可选终端命令
+## 配置与命令
 
 ```bash
-npx -y github:chainlinn/ReelBridge#v0.1.1 --init  # 创建共享配置，不覆盖
-npx -y github:chainlinn/ReelBridge#v0.1.1 up      # 启动/复用后端，显示进度并退出
-npx -y github:chainlinn/ReelBridge#v0.1.1 status  # 只检查，不启动或登录
+npx -y github:chainlinn/ReelBridge#v0.1.1 --init  # 生成配置，不覆盖
+npx -y github:chainlinn/ReelBridge#v0.1.1 up      # 启动后端，就绪后退出
+npx -y github:chainlinn/ReelBridge#v0.1.1 status  # 只检查状态
 ```
 
-`up` 不执行 Gying 配置或 CMS 写操作。`status` 输出 JSON：配置来源和加载结果、Docker/Compose、容器及后端状态；不输出密钥。异常退出码为非零。
+默认配置：`~/.config/reel-bridge/.env`（支持 `XDG_CONFIG_HOME`）。数据：`~/.reel-bridge`。模板见 [.env.example](.env.example)，修改后重连客户端。
 
-## 配置
-
-默认读取 `~/.config/reel-bridge/.env`，支持 `XDG_CONFIG_HOME`。环境变量优先于文件。模板见 [.env.example](.env.example)。不需要配置也能使用托管搜索；`--init` 是可选操作。
-
-| 变量 | 用途 |
+| 可选变量 | 用途 |
 |---|---|
-| `PANSOU_URL` | 连接已有实例，不操作 Docker |
-| `PANSOU_USER` / `PANSOU_PASS` | 已有实例的认证账号 |
-| `REEL_BRIDGE_ENV_FILE` | 指定配置文件绝对路径；空字符串禁用文件加载 |
-| `REEL_BRIDGE_DATA_DIR` | 数据目录，默认 `~/.reel-bridge` |
-| `PANSOU_PORT` / `PANSOU_IMAGE` | 托管端口和镜像；默认 7742 / `ghcr.io/fish2018/pansou-web:latest` |
-| `PROXY` | 托管后端代理，例如 `http://host.docker.internal:7890` |
-| `GYING_URL` / `GYING_USER` / `GYING_PASS` | 可选观影站点与账号，搜索时自动管理登录 |
-| `CMS_URL` / `CMS_TOKEN` | 可选 CloudMediaSync，启用转存和同步 |
+| `PANSOU_URL` | 连接已有 PanSou，不操作 Docker |
+| `PANSOU_USER` / `PANSOU_PASS` | 已有服务的认证账号 |
+| `REEL_BRIDGE_ENV_FILE` | 指定 `.env` 文件绝对路径 |
+| `REEL_BRIDGE_DATA_DIR` | 自定义数据目录 |
+| `PANSOU_PORT` | 托管端口，默认 `127.0.0.1:7742` |
+| `PROXY` | 托管后端代理 |
+| `GYING_URL` / `GYING_USER` / `GYING_PASS` | 观影站点与账号 |
+| `CMS_URL` / `CMS_TOKEN` | CloudMediaSync 地址与令牌 |
 
-不要把凭据提交到 Git 或写入 npx 缓存。CMS、Gying 凭据需成对配置；修改后重连 MCP。默认配置缺失允许使用环境变量/默认值，显式指定的配置不存在则报错。
-
-**从 v0.1.0 升级：** 不再自动读取源码包根目录 `.env`。旧文件无需移动，在 MCP 的 `env` 中添加 `REEL_BRIDGE_ENV_FILE` 指向旧文件即可；或者复制到新的用户配置目录。数据目录不变，不自动迁移或接管旧容器。
+也可直接写入 MCP 配置的 `env`，优先于文件。基础搜索无需配置账号；CMS 和 Gying 按需启用。不要分享真实凭据。
 
 ## 工具
 
-| 工具 | 用途 |
-|---|---|
-| `search` | 搜索资源；`plugins: ["gying"]` 指定来源 |
-| `check_links` | 批量校验分享链接 |
-| `status` | 只读诊断；Gying 显示本进程最后观测状态，不主动登录 |
-| `cms_add_share` | 可选：提交 115、阿里、magnet、ed2k 转存任务 |
-| `cms_sync` | 可选：增量同步；`auto_organize: true` 同时整理 |
+- `search`：搜索资源，可用 `plugins: ["gying"]` 指定来源。
+- `check_links`：批量校验链接。
+- `status`：只读诊断，不启动后端或登录。
+- `cms_add_share`：可选，提交转存任务。
+- `cms_sync`：可选，增量同步；`auto_organize: true` 同时整理。
 
-**搜索不自动转存，启动不自动同步。** CMS 成功仅代表入队，超时后不要盲目重试。尚未提供独立 Emby API 工具，入库通知请在 CMS 配置。
+搜索不会自动转存，CMS 成功仅代表入队。退出 MCP 不停止后端。仅支持 stdio；跨机器使用请在客户端运行 MCP，并配置服务器的 `PANSOU_URL`。
 
 ## 开发
 
 ```bash
-git clone https://github.com/chainlinn/ReelBridge.git
-cd ReelBridge
 npm test
 node bin/reel-bridge.mjs --help
-npm pack --dry-run
 ```
 
-无需 `npm install`。`src/` 按协议、配置、运行时、PanSou、Gying、CMS 拆分；`assets/compose.yml` 是托管模板。根目录 Compose 是手动部署示例，读取同目录 `.env` 并使用 `./data`，与 MCP 用户配置独立。
-
-仅支持 stdio，不开放远程 MCP 端口。保护本地凭据文件；Docker 日志轮转不覆盖后端文件日志。第三方资源的有效性和授权需自行确认，本项目不是各后端的官方项目。
+无需 `npm install`。本项目为第三方集成工具，请仅处理有权访问的资源。

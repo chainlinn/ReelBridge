@@ -1,4 +1,5 @@
 import { requestJSON } from './http.mjs';
+import { gyingError } from './diagnostics.mjs';
 
 export class PanSou {
   constructor(config, request = requestJSON) { this.config = config; this.request = request; this.token = ''; }
@@ -54,7 +55,7 @@ export class PanSou {
   }
   async gying(hash, action, extra = {}) {
     const r = await this.api('/gying/' + hash, { action, ...extra });
-    if (!r?.success) throw new Error('Gying ' + action + ' 失败，请检查站点、账号或后端日志');
+    if (r?.success !== true) throw gyingError(action, r?.message || r?.msg);
     return r.data || {};
   }
 }

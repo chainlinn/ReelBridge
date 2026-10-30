@@ -17,6 +17,8 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: npm test
       - run: node bin/reel-bridge.mjs --version
+      - name: Check Python probe syntax
+        run: python3 -c "import ast, pathlib; ast.parse(pathlib.Path('scripts/gying-pow-probe.py').read_text())"
       - name: Check package contents
         shell: bash
         run: |
@@ -25,7 +27,7 @@ jobs:
           import { readFileSync } from 'node:fs';
           const files = JSON.parse(readFileSync('/tmp/package.json', 'utf8'))[0].files;
           for (const {path} of files) {
-            if (!['package.json', 'README.md', 'CHANGELOG.md', '.env.example'].includes(path) && !/^(bin|src|assets)\//.test(path)) {
+            if (!['package.json', 'README.md', 'CHANGELOG.md', '.env.example', 'docs/gying.md', 'scripts/gying-pow-probe.py', 'patches/pansou-gying-diagnostics.patch'].includes(path) && !/^(bin|src|assets)\//.test(path)) {
               throw new Error('Unexpected package file: ' + path);
             }
           }

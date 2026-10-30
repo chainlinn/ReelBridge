@@ -13,7 +13,7 @@
   "mcpServers": {
     "reel-bridge": {
       "command": "npx",
-      "args": ["-y", "github:chainlinn/ReelBridge#v0.1.1"]
+      "args": ["-y", "github:chainlinn/ReelBridge#v0.1.2"]
     }
   }
 }
@@ -24,9 +24,9 @@
 ## 配置与命令
 
 ```bash
-npx -y github:chainlinn/ReelBridge#v0.1.1 --init  # 生成配置，不覆盖
-npx -y github:chainlinn/ReelBridge#v0.1.1 up      # 启动后端，就绪后退出
-npx -y github:chainlinn/ReelBridge#v0.1.1 status  # 只检查状态
+npx -y github:chainlinn/ReelBridge#v0.1.2 --init  # 生成配置，不覆盖
+npx -y github:chainlinn/ReelBridge#v0.1.2 up      # 启动后端，就绪后退出
+npx -y github:chainlinn/ReelBridge#v0.1.2 status  # 只检查状态
 ```
 
 默认配置：`~/.config/reel-bridge/.env`（支持 `XDG_CONFIG_HOME`）。数据：`~/.reel-bridge`。模板见 [.env.example](.env.example)，修改后重连客户端。
@@ -46,11 +46,13 @@ npx -y github:chainlinn/ReelBridge#v0.1.1 status  # 只检查状态
 
 ## 工具
 
-- `search`：搜索资源，可用 `plugins: ["gying"]` 指定来源。
+- `search`：搜索资源；`plugins: ["gying"]` 指定来源，首次会有限等待登录。
 - `check_links`：批量校验链接。
-- `status`：只读诊断，不启动后端或登录。
+- `status`：只读诊断，显示 Gying 初始化阶段、错误码及冷却时间，不启动或登录。
 - `cms_add_share`：可选，提交转存任务。
 - `cms_sync`：可选，增量同步；`auto_organize: true` 同时整理。
+
+Gying 排错与无账号 PoW 探针见 [诊断说明](docs/gying.md)。搜索零结果不代表站点失效。
 
 搜索不会自动转存，CMS 成功仅代表入队。退出 MCP 不停止后端。仅支持 stdio；跨机器使用请在客户端运行 MCP，并配置服务器的 `PANSOU_URL`。
 

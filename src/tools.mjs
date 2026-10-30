@@ -50,7 +50,7 @@ export function createTools(config, runtime, pansou, gying, cms) {
     if (!background) background = runtime.start().then(c => {
       Object.assign(pansou.config, c);
       return pansou.health();
-    }).then(() => { void gying.ensure(); }).catch(e => { background = null; throw e; });
+    }).catch(e => { background = null; throw e; });
     return background;
   }
   async function ready() {
@@ -85,19 +85,37 @@ export function createTools(config, runtime, pansou, gying, cms) {
           configuration: config.configuration,
           runtime: runtimeStatus,
           pansou: { ...health, ...(health.state === 'unavailable' ? { hint: config.mode === 'external' ? '检查 PANSOU_URL 与网络连通性' : '查看 Docker 状态；执行 up 或发起搜索准备后端' } : {}) },
-          gying: { ...gying.state, observed_by: 'current_process', hint: '仅报告本进程观测状态；此操作不会登录或修改站点' },
+          gying: { ...gying.snapshot(), observed_by: 'current_process', hint: '仅报告本进程观测状态；此操作不会登录或修改站点' },
           cms: { configured: config.cms.enabled, connectivity: 'not_tested' },
         } };
       }
+      if (name === 'search' && args.plugins?.length && args.src === 'tg') throw new Error('plugins 与 src=tg 不能同时使用');
       await ready();
       if (name === 'check_links') return { data: await pansou.checkLinks(args.links) };
-      if (args.plugins?.length && args.src === 'tg') throw new Error('plugins 与 src=tg 不能同时使用');
+      const useGying = args.src !== 'tg' && (!args.plugins?.length || args.plugins.includes('gying'));
       const gyingOnly = args.plugins?.length === 1 && args.plugins[0] === 'gying';
-      void gying.ensure();
-      const g = gying.state;
-      if (gyingOnly && g.configured && g.state !== 'ready') throw new Error(g.error || 'Gying 正在初始化，请稍后通过 status 确认后重试');
+      let g = gying.snapshot();
+      if (useGying && g.configured) {
+        if (gyingOnly) {
+          g = await gying.waitUntilReady();
+          if (g.state !== 'ready') {
+            const wait = Math.ceil((g.retry_after_ms || 0) / 1000);
+            throw new Error(g.error + (wait ? `；${wait} 秒后可重试` : ''));
+          }
+        } else {
+          void gying.ensure();
+        }
+      }
       const data = await pansou.search(args);
-      if (g.state === 'degraded') data.warnings = [g.error];
+      g = gying.snapshot();
+      if (useGying && g.configured) {
+        data.gying = g;
+        if (g.state === 'degraded') data.warnings = [g.error];
+        else if (g.state !== 'ready') data.warnings = ['Gying 正在后台初始化；当前搜索可能不含该来源'];
+        if (gyingOnly && data.total === 0) {
+          data.warnings = ['PanSou 返回零结果；不等于站点不可用或账号失效，也可能是无匹配、缓存或后端发布窗口截断'];
+        }
+      }
       return { data };
     },
   };

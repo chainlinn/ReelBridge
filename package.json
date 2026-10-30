@@ -1,11 +1,11 @@
 {
   "name": "reel-bridge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "ReelBridge 影桥 — a zero-dependency MCP bridge for media discovery, cloud transfers and library sync",
   "type": "module",
   "engines": { "node": ">=22.16.0" },
   "bin": { "reel-bridge": "./bin/reel-bridge.mjs" },
-  "files": ["bin/", "src/", "assets/", "README.md", "CHANGELOG.md", ".env.example"],
+  "files": ["bin/", "src/", "assets/", "docs/gying.md", "scripts/gying-pow-probe.py", "patches/pansou-gying-diagnostics.patch", "README.md", "CHANGELOG.md", ".env.example"],
   "repository": { "type": "git", "url": "git+https://github.com/chainlinn/ReelBridge.git" },
   "homepage": "https://github.com/chainlinn/ReelBridge#readme",
   "bugs": { "url": "https://github.com/chainlinn/ReelBridge/issues" },

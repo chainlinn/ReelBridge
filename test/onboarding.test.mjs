@@ -66,11 +66,12 @@ test('status 只诊断；search/check_links 才启动且共享准备过程', asy
   let starts = 0, inspections = 0, gyingCalls = 0;
   const tools = createTools(c, { inspect: async () => { inspections++; return { state: 'idle' }; }, start: async () => { starts++; return c.pansou; } },
     { config: {}, health: async () => ({ status: 'ok' }), search: async () => ({ total: 1 }), checkLinks: async () => ({ results: [] }) },
-    { state: { configured: false, state: 'disabled' }, ensure: async () => { gyingCalls++; } }, {});
+    { snapshot: () => ({ configured: false, state: 'disabled' }), ensure: async () => { gyingCalls++; } }, {});
   await tools.call('status');
   assert.equal(inspections, 1); assert.equal(starts, 0); assert.equal(gyingCalls, 0);
   await Promise.all([tools.call('search', { keyword: 'test' }), tools.call('check_links', { links: [{ url: 'http://example.test/s/a', disk_type: 'quark' }] })]);
   assert.equal(starts, 1);
+  assert.equal(gyingCalls, 0);
 });
 
 test('Docker inspect 诊断不创建数据目录，也不执行 compose up', async t => {

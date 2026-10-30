@@ -1,0 +1,177 @@
+diff --git a/plugin/gying/gying.go b/plugin/gying/gying.go
+index 57e7b11..db36b21 100644
+--- a/plugin/gying/gying.go
++++ b/plugin/gying/gying.go
+@@ -1827,6 +1827,9 @@ func (p *GyingPlugin) computePowResult(challenge *ChallengePageData) (string, er
+ 		time.Sleep(powMinSolveTime - elapsed)
+ 	}
+ 
++	if powDiagnosticsEnabled() {
++		fmt.Printf("[Gying PoW] compute_ms=%d submit_elapsed_ms=%d\n", elapsed.Milliseconds(), time.Since(start).Milliseconds())
++	}
+ 	return y.Text(16), nil
+ }
+ 
+@@ -1923,6 +1926,19 @@ func (p *GyingPlugin) solveLegacyHashChallenge(scraper *cloudscraper.Scraper, re
+ }
+ 
+ func (p *GyingPlugin) submitChallengeVerification(scraper *cloudscraper.Scraper, requestURL string, form url.Values) error {
++	diagnostic := powDiagnosticsEnabled()
++	if diagnostic {
++		if client, err := getScraperClient(scraper); err == nil && client.Jar != nil {
++			if target, err := url.Parse(requestURL); err == nil {
++				names := make([]string, 0)
++				for _, cookie := range client.Jar.Cookies(target) {
++					names = append(names, cookie.Name)
++				}
++				proxyOn := config.AppConfig != nil && strings.TrimSpace(config.AppConfig.ProxyURL) != ""
++				fmt.Printf("[Gying PoW] before_cookies=%s proxy=%t\n", powCookieSummary(names), proxyOn)
++			}
++		}
++	}
+ 	resp, err := scraper.Post(requestURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+ 	if err != nil {
+ 		return fmt.Errorf("提交验证失败: %w", err)
+@@ -1937,6 +1953,13 @@ func (p *GyingPlugin) submitChallengeVerification(scraper *cloudscraper.Scraper,
+ 	if err != nil {
+ 		return fmt.Errorf("读取验证响应失败: %w", err)
+ 	}
++	if diagnostic {
++		names := make([]string, 0)
++		for _, cookie := range resp.Cookies() {
++			names = append(names, cookie.Name)
++		}
++		fmt.Printf("[Gying PoW] %s set_cookie_names=%s\n", powResponseSummary(resp.StatusCode, respBody), powCookieSummary(names))
++	}
+ 	if isBotChallengePage(respBody) {
+ 		return fmt.Errorf("机器人验证出现循环")
+ 	}
+@@ -1946,6 +1969,9 @@ func (p *GyingPlugin) submitChallengeVerification(scraper *cloudscraper.Scraper,
+ 		return fmt.Errorf("解析验证响应失败: %w", err)
+ 	}
+ 	if !verifyResp.Success {
++		if diagnostic {
++			return fmt.Errorf("机器人验证失败 (%s)", powResponseSummary(resp.StatusCode, respBody))
++		}
+ 		if verifyResp.Msg != "" {
+ 			return fmt.Errorf("机器人验证失败: %s", verifyResp.Msg)
+ 		}
+diff --git a/plugin/gying/gying_pow_diagnostics.go b/plugin/gying/gying_pow_diagnostics.go
+new file mode 100644
+index 0000000..05ff358
+--- /dev/null
++++ b/plugin/gying/gying_pow_diagnostics.go
+@@ -0,0 +1,66 @@
++package gying
++
++import (
++	"encoding/json"
++	"fmt"
++	"os"
++	"strings"
++)
++
++func powDiagnosticsEnabled() bool {
++	return os.Getenv("GYING_DIAGNOSTICS") == "true"
++}
++
++// Never return response text, cookie values, challenge IDs or PoW inputs.
++func powCookieSummary(names []string) string {
++	known := []string{"browser_pow", "browser_verified", "PHPSESSID", "app_auth", "BT_auth", "BT_cookietime"}
++	present := make(map[string]bool)
++	for _, name := range names {
++		present[name] = true
++	}
++	result := make([]string, 0, len(known))
++	for _, name := range known {
++		if present[name] {
++			result = append(result, name)
++		}
++	}
++	return strings.Join(result, ",")
++}
++
++func powResponseSummary(status int, raw []byte) string {
++	var data map[string]json.RawMessage
++	if err := json.Unmarshal(raw, &data); err != nil {
++		return fmt.Sprintf("http=%d json=false bytes=%d", status, len(raw))
++	}
++	success := "missing"
++	if value, ok := data["success"]; ok {
++		var flag bool
++		success = "invalid"
++		if string(value) != "null" && json.Unmarshal(value, &flag) == nil {
++			success = fmt.Sprint(flag)
++		}
++	}
++	fields := make([]string, 0)
++	for _, key := range []string{"success", "msg", "message", "error", "code", "ret", "errcode", "challenge_id"} {
++		if _, ok := data[key]; ok {
++			fields = append(fields, key)
++		}
++	}
++	category := "unspecified"
++	for _, key := range []string{"msg", "message", "error"} {
++		var text string
++		if json.Unmarshal(data[key], &text) != nil {
++			continue
++		}
++		text = strings.ToLower(text)
++		switch {
++		case strings.Contains(text, "expired"), strings.Contains(text, "过期"):
++			category = "expired"
++		case strings.Contains(text, "cookie"), strings.Contains(text, "session"), strings.Contains(text, "会话"):
++			category = "session"
++		case strings.Contains(text, "invalid"), strings.Contains(text, "错误"):
++			category = "invalid"
++		}
++	}
++	return fmt.Sprintf("http=%d json=true success=%s fields=%s category=%s", status, success, strings.Join(fields, ","), category)
++}
+diff --git a/plugin/gying/gying_pow_diagnostics_test.go b/plugin/gying/gying_pow_diagnostics_test.go
+new file mode 100644
+index 0000000..6ebf7ca
+--- /dev/null
++++ b/plugin/gying/gying_pow_diagnostics_test.go
+@@ -0,0 +1,41 @@
++package gying
++
++import (
++	"strings"
++	"testing"
++)
++
++func TestPowResponseSummaryDoesNotLeakSecrets(t *testing.T) {
++	raw := []byte(`{"success":false,"message":"expired secret-cookie","challenge_id":"secret-id","unknown":"secret-key"}`)
++	got := powResponseSummary(200, raw)
++	if !strings.Contains(got, "success=false") || !strings.Contains(got, "category=expired") {
++		t.Fatal(got)
++	}
++	for _, secret := range []string{"secret-cookie", "secret-id", "secret-key", "unknown"} {
++		if strings.Contains(got, secret) {
++			t.Fatalf("leaked: %s", got)
++		}
++	}
++}
++
++func TestPowCookieSummaryOnlyKnownNames(t *testing.T) {
++	got := powCookieSummary([]string{"evil-secret", "browser_pow", "browser_pow", "app_auth"})
++	if got != "browser_pow,app_auth" {
++		t.Fatal(got)
++	}
++}
++
++func TestPowResponseSummaryHandlesInvalidAndMissingSuccess(t *testing.T) {
++	for _, tc := range []struct{ raw, want string }{
++		{`{"message":"x"}`, "success=missing"},
++		{`{"success":"yes"}`, "success=invalid"},
++		{`{"success":null}`, "success=invalid"},
++		{`{"success":true}`, "success=true"},
++		{`<!DOCTYPE html> secret`, "json=false"},
++	} {
++		got := powResponseSummary(200, []byte(tc.raw))
++		if !strings.Contains(got, tc.want) || strings.Contains(got, "secret") {
++			t.Fatal(got)
++		}
++	}
++}

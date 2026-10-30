@@ -151,7 +151,7 @@ test('Gying 故障不阻塞普通搜索；只指定 gying 时明确报错', asyn
   const tools = createTools(c, { start: async () => c.pansou }, {
     config: {}, health: async () => ({ status: 'ok' }),
     search: async () => { searched++; return { total: 1 }; },
-  }, { state: degraded, ensure: async () => degraded }, {});
+  }, { state: degraded, snapshot: () => degraded, ensure: async () => degraded, waitUntilReady: async () => degraded }, {});
   const r = await tools.call('search', { keyword: 'test' });
   assert.equal(r.data.total, 1);
   assert.deepEqual(r.data.warnings, ['Gying unavailable']);

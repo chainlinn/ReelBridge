@@ -39,9 +39,14 @@ test('非法 JSON、非法 request、未知工具和未知方法返回正确 JSO
   assert.deepEqual(replies.filter(r => r.error).map(r => r.error.code), [-32700, -32600, -32602, -32601]);
 });
 
-test('CMS 调用在未发 initialized 通知时也不启动 PanSou', async () => {
+test('握手、initialized、工具发现、status 和 CMS 都不触发后端启动', async () => {
   let starts = 0;
-  const replies = await session([initialize, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'cms_sync' } }], { start: async () => { starts++; } });
+  const replies = await session([initialize,
+    { jsonrpc: '2.0', method: 'notifications/initialized' },
+    { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'status' } },
+    { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'cms_sync' } },
+  ], { start: async () => { starts++; } });
   assert.equal(starts, 0);
-  assert.equal(replies[1].result.structuredContent.ok, true);
+  assert.equal(replies.find(r => r.id === 4).result.structuredContent.ok, true);
 });

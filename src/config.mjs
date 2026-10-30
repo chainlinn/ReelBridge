@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, openSync, writeFileSync, closeSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 import { homedir } from 'node:os';
 import { resolve, isAbsolute } from 'node:path';
@@ -26,15 +26,53 @@ function directory(value) {
   return resolve(expanded);
 }
 
-// 不修改 process.env；真实环境变量优先，显式指定但不存在的 env 文件应报错。
+export function configPath(env = process.env) {
+  if (env.REEL_BRIDGE_ENV_FILE) return resolve(env.REEL_BRIDGE_ENV_FILE);
+  const home = env.HOME || env.USERPROFILE || homedir();
+  const base = env.XDG_CONFIG_HOME && isAbsolute(env.XDG_CONFIG_HOME)
+    ? env.XDG_CONFIG_HOME : resolve(home, '.config');
+  return resolve(base, 'reel-bridge', '.env');
+}
+
+export function initConfig(env = process.env) {
+  if (env.REEL_BRIDGE_ENV_FILE === '') throw new Error('REEL_BRIDGE_ENV_FILE 为空，已禁用文件配置；请取消该变量或指定路径');
+  const path = configPath(env);
+  const template = readFileSync(resolve(ROOT, '.env.example'), 'utf8');
+  mkdirSync(resolve(path, '..'), { recursive: true, mode: 0o700 });
+  let fd;
+  try { fd = openSync(path, 'wx', 0o600); }
+  catch (e) { if (e.code === 'EEXIST') return { path, state: 'exists' }; throw new Error('无法创建配置文件，请检查目录权限'); }
+  try { writeFileSync(fd, template); } finally { closeSync(fd); }
+  return { path, state: 'created' };
+}
+
+// 不自动搜索工作目录或 npx 包目录，避免读取错误部署的凭据。
 export function loadConfig(env = process.env) {
-  const file = env.REEL_BRIDGE_ENV_FILE ? resolve(env.REEL_BRIDGE_ENV_FILE) : resolve(ROOT, '.env');
+  const file = configPath(env);
+  const configuration = { path: file, source: env.REEL_BRIDGE_ENV_FILE ? 'explicit' : 'user', state: 'absent', overridden_keys: [] };
   let values = {};
-  if (env.REEL_BRIDGE_ENV_FILE !== '') {
-    try { values = parseEnv(readFileSync(file, 'utf8')); }
-    catch (e) { if (env.REEL_BRIDGE_ENV_FILE || e.code !== 'ENOENT') throw new Error('.env 无法读取或解析'); }
+  if (env.REEL_BRIDGE_ENV_FILE === '') configuration.state = 'disabled';
+  else {
+    try { values = parseEnv(readFileSync(file, 'utf8')); configuration.state = 'loaded'; }
+    catch (e) {
+      if (e.code !== 'ENOENT' || env.REEL_BRIDGE_ENV_FILE) {
+        const error = new Error('.env 无法读取或解析；请检查路径与权限');
+        error.configuration = { ...configuration, state: 'rejected', reason: e.code === 'ENOENT' ? 'file_not_found' : 'unreadable_or_invalid' };
+        throw error;
+      }
+    }
   }
+  configuration.overridden_keys = Object.keys(values).filter(key => Object.hasOwn(env, key));
   const e = { ...values, ...env };
+  try {
+    return buildConfig(e, configuration);
+  } catch (error) {
+    error.configuration = { ...configuration, state: 'rejected', reason: error.message };
+    throw error;
+  }
+}
+
+function buildConfig(e, configuration) {
   const url = endpoint(e.PANSOU_URL, 'PANSOU_URL');
   const cmsUrl = endpoint(e.CMS_URL, 'CMS_URL');
   const gyingUrl = endpoint(e.GYING_URL, 'GYING_URL');
@@ -43,10 +81,10 @@ export function loadConfig(env = process.env) {
     if (Boolean(e[a]) !== Boolean(e[b])) throw new Error(a + ' 与 ' + b + ' 必须同时配置');
   }
   const port = integer(e.PANSOU_PORT, 7742, 'PANSOU_PORT', 65535);
-  const dataDir = directory(e.REEL_BRIDGE_DATA_DIR || resolve(homedir(), '.reel-bridge'));
+  const dataDir = directory(e.REEL_BRIDGE_DATA_DIR || resolve(e.HOME || e.USERPROFILE || homedir(), '.reel-bridge'));
   const secretValues = [e.PANSOU_PASS, e.AUTH_JWT_SECRET, e.CMS_TOKEN, e.GYING_PASS].filter(Boolean);
   return {
-    mode: url ? 'external' : 'managed', dataDir,
+    mode: url ? 'external' : 'managed', dataDir, configuration,
     pansou: { url: url || 'http://127.0.0.1:' + port, user: e.PANSOU_USER || '', pass: e.PANSOU_PASS || '', timeout: integer(e.PANSOU_TIMEOUT, 90000, 'PANSOU_TIMEOUT') },
     runtime: { port, image: e.PANSOU_IMAGE || 'ghcr.io/fish2018/pansou-web:latest', proxy: e.PROXY || '', startupTimeout: integer(e.PANSOU_STARTUP_TIMEOUT, 300000, 'PANSOU_STARTUP_TIMEOUT') },
     cms: { enabled: Boolean(cmsUrl && e.CMS_TOKEN), url: cmsUrl, token: e.CMS_TOKEN || '', timeout: integer(e.CMS_TIMEOUT, 30000, 'CMS_TIMEOUT') },

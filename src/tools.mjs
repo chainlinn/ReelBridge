@@ -75,12 +75,19 @@ export function createTools(config, runtime, pansou, gying, cms) {
       }
       if (name === 'cms_sync') return { data: await cms.sync(args.auto_organize) };
       if (name === 'status') {
+        const runtimeStatus = await runtime.inspect();
         let health;
         try {
           const d = await pansou.health();
           health = { state: 'healthy', auth_enabled: d.auth_enabled, plugins: d.plugins || [], channel_count: (d.channels || []).length };
         } catch (e) { health = { state: 'unavailable', error: e.message }; }
-        return { data: { runtime: runtime.status(), pansou: health, gying: gying.state, cms: { configured: config.cms.enabled, connectivity: 'not_tested' } } };
+        return { data: {
+          configuration: config.configuration,
+          runtime: runtimeStatus,
+          pansou: { ...health, ...(health.state === 'unavailable' ? { hint: config.mode === 'external' ? '检查 PANSOU_URL 与网络连通性' : '查看 Docker 状态；执行 up 或发起搜索准备后端' } : {}) },
+          gying: { ...gying.state, observed_by: 'current_process', hint: '仅报告本进程观测状态；此操作不会登录或修改站点' },
+          cms: { configured: config.cms.enabled, connectivity: 'not_tested' },
+        } };
       }
       await ready();
       if (name === 'check_links') return { data: await pansou.checkLinks(args.links) };

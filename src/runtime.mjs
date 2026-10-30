@@ -97,6 +97,20 @@ export class Runtime {
     if (!this.promise) this.promise = this.prepare().catch(e => { this.state = 'error'; this.error = e.message; this.promise = null; throw e; });
     return this.promise;
   }
+  async inspect() {
+    if (this.config.mode === 'external') return { ...this.status(), docker: 'not_required' };
+    try {
+      const version = await this.docker(['info', '--format', '{{.ServerVersion}}'], { timeout: 5000 });
+      const compose = await this.docker(['compose', 'version', '--short'], { timeout: 5000 });
+      const ids = await this.docker(['ps', '-a', '--filter', 'label=dev.reel-bridge.owner=' + this.project, '--format', '{{.ID}}'], { timeout: 5000 });
+      const containers = ids ? JSON.parse(await this.docker(['inspect', ...ids.split(/\s+/)], { timeout: 5000 })) : [];
+      return { ...this.status(), docker: 'available', docker_version: version, compose_version: compose,
+        containers: containers.map(c => ({ state: c.State?.Status, health: c.State?.Health?.Status || 'unknown' })),
+        hint: containers.length ? undefined : '尚未部署；首次搜索自动启动，或执行 reel-bridge up' };
+    } catch (e) {
+      return { ...this.status(), docker: 'unavailable', error: e.message, hint: '检查 Docker 是否启动、当前用户是否有权限，以及 Compose v2 是否可用' };
+    }
+  }
   async prepare() {
     if (this.config.mode === 'external') return this.config.pansou;
     this.state = 'starting';
@@ -104,6 +118,7 @@ export class Runtime {
     const { config: c } = this;
     await mkdir(c.dataDir, { recursive: true, mode: 0o700 });
     return withLock(c.dataDir, async () => {
+      this.log('检查 Docker 与 Compose');
       await this.docker(['info', '--format', '{{.ServerVersion}}'], { timeout: 10000 });
       await this.docker(['compose', 'version', '--short'], { timeout: 10000 });
       const path = resolve(c.dataDir, 'runtime.json');
@@ -133,9 +148,13 @@ export class Runtime {
         const containers = JSON.parse(await this.docker(['inspect', ...ids.split(/\s+/)], options));
         if (containers.some(x => x.Config?.Labels?.['dev.reel-bridge.owner'] !== this.project)) throw new Error('拒绝接管非本运行时创建的容器');
       }
-      this.log('准备 PanSou 容器（首次拉镜像可能需要数分钟）');
-      await this.docker([...args, 'up', '-d', '--pull', 'missing', '--wait', '--wait-timeout', String(Math.ceil(c.runtime.startupTimeout / 1000))], options);
+      this.log('启动或复用 PanSou，拉取缺失镜像并等待健康检查');
+      const heartbeat = setInterval(() => this.log('仍在等待 Docker 就绪；首次拉镜像可能需要数分钟'), 10000);
+      try {
+        await this.docker([...args, 'up', '-d', '--pull', 'missing', '--wait', '--wait-timeout', String(Math.ceil(c.runtime.startupTimeout / 1000))], options);
+      } finally { clearInterval(heartbeat); }
       this.state = 'ready';
+      this.log('PanSou 容器已就绪');
       return { ...c.pansou, user: credentials.user, pass: credentials.pass };
     }, c.runtime.startupTimeout + 10000);
   }

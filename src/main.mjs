@@ -13,23 +13,14 @@ export function serve(tools, { input = process.stdin, output = process.stdout, r
   const result = (id, value) => send({ jsonrpc: '2.0', id, result: value });
   const error = (id, code, message) => send({ jsonrpc: '2.0', id, error: { code, message } });
   let initialized = false;
-  let booted = false;
   const pending = new Set();
   const lines = createInterface({ input, crlfDelay: Infinity });
-  const boot = () => {
-    if (booted) return;
-    booted = true;
-    tools.start().catch(e => log(redact(e.message)));
-  };
   async function dispatch(message) {
     if (!message || typeof message !== 'object' || Array.isArray(message) || message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
       error(null, -32600, 'Invalid Request'); return;
     }
     const { id, method, params } = message;
-    if (id === undefined) {
-      if (method === 'notifications/initialized' && initialized) boot();
-      return;
-    }
+    if (id === undefined) return;
     if (id === null || !['string', 'number'].includes(typeof id)) { error(null, -32600, 'Invalid id'); return; }
     if (method === 'initialize') {
       if (!params || typeof params.protocolVersion !== 'string') { error(id, -32602, 'protocolVersion required'); return; }
@@ -47,8 +38,6 @@ export function serve(tools, { input = process.stdin, output = process.stdout, r
     if (method === 'tools/call') {
       if (!params || typeof params.name !== 'string') { error(id, -32602, 'Tool name required'); return; }
       if (!tools.definitions.some(t => t.name === params.name)) { error(id, -32602, 'Unknown tool'); return; }
-      // 正常客户端在 initialized 时启动；CMS-only 调用不隐式依赖后端。
-      if (!params.name.startsWith('cms_')) boot();
       let progress;
       const progressToken = params._meta?.progressToken;
       if (typeof progressToken === 'string' || typeof progressToken === 'number') {
@@ -79,14 +68,19 @@ export function serve(tools, { input = process.stdin, output = process.stdout, r
   return new Promise(resolve => lines.on('close', async () => { await Promise.allSettled([...pending]); resolve(); }));
 }
 
-export async function main() {
-  const config = loadConfig();
-  const log = message => process.stderr.write('[reel-bridge] ' + config.redact(message) + '\n');
+export function createApp(config, log = () => {}) {
   const runtime = new Runtime(config, { log });
   const pansou = new PanSou({ ...config.pansou });
   const gying = new Gying(config.gying, pansou, config.dataDir);
   const cms = new CMS(config.cms);
   const tools = createTools(config, runtime, pansou, gying, cms);
-  log('模式: ' + config.mode + '；工具数: ' + tools.definitions.length);
+  return { tools, runtime, pansou, gying, cms };
+}
+
+export async function main() {
+  const config = loadConfig();
+  const log = message => process.stderr.write('[reel-bridge] ' + config.redact(message) + '\n');
+  const { tools } = createApp(config, log);
+  log('模式: ' + config.mode + '；工具数: ' + tools.definitions.length + '；后端按需启动');
   await serve(tools, { redact: config.redact, log });
 }
